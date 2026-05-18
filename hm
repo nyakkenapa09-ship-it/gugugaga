@@ -1,0 +1,120 @@
+-- [[ MM2 SHERIFF SILENT AIM - PURE VECTOR 3D TORSO LOCK (LouisHub) ]] --
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "LouisHub | MM2 Vector3 Core",
+   LoadingTitle = "Mengunci Titik Koordinat 3D...",
+   LoadingSubtitle = "by @lann",
+   ConfigurationSaving = { Enabled = false },
+   Discord = { Enabled = false },
+   KeySystem = false
+})
+
+-- Global Variables
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local SilentAimEnabled = false
+
+-- Fungsi Pemindaian Target Instan (Mencari Korban Tanpa Delay)
+local function GetMurderer()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            -- Deteksi langsung eksistensi senjata Knife di inventory/karakter
+            if player.Character:FindFirstChild("Knife") or player.Backpack:FindFirstChild("Knife") then
+                return player.Character
+            end
+        end
+    end
+    return nil
+end
+
+-- ==============================================================================
+-- [INTENS KERNEL HOOK: VECTOR 3D MANIPULATION]
+-- ==============================================================================
+
+-- 1. Manipulasi Posisi Kursor 3D (CFrame dari Vector3 Dada)
+local OldIndex
+OldIndex = hookmetamethod(game, "__index", function(Self, Property)
+    if SilentAimEnabled and Self == Mouse and (Property == "Hit" or Property == "Target") then
+        local Murderer = GetMurderer()
+        if Murderer then
+            -- Seleksi bagian dada (UpperTorso R15 atau Torso R6)
+            local Chest = Murderer:FindFirstChild("UpperTorso") or Murderer:FindFirstChild("Torso") or Murderer:FindFirstChild("HumanoidRootPart")
+            if Chest then
+                -- Ekstraksi nilai Vector3 murni
+                local Vector3D_Dada = Chest.Position
+                
+                if Property == "Hit" then
+                    return CFrame.new(Vector3D_Dada)
+                elseif Property == "Target" then
+                    return Chest
+                end
+            end
+        end
+    end
+    return OldIndex(Self, Property)
+end)
+
+-- 2. Intersepsi Fisik Jalur Lintasan Peluru (Raycast Vector3)
+local OldNamecall
+OldNamecall = hookmetamethod(game, "__namecall", function(Self, ...)
+    local Args = {...}
+    local Method = getnamecallmethod()
+    
+    if SilentAimEnabled and (Method == "Raycast" or Method == "FindPartOnRay" or Method == "FindPartOnRayWithIgnoreList") then
+        local Murderer = GetMurderer()
+        if Murderer then
+            local Chest = Murderer:FindFirstChild("UpperTorso") or Murderer:FindFirstChild("Torso") or Murderer:FindFirstChild("HumanoidRootPart")
+            if Chest then
+                -- Ambil titik koordinat Vector3 dada target
+                local TargetVector3 = Chest.Position
+                
+                if Method == "Raycast" then
+                    -- Args[1] = Origin (Vector3), Args[2] = Direction (Vector3)
+                    if Args[1] then
+                        -- Paksa arah vektor baru menuju dada target
+                        Args[2] = (TargetVector3 - Args[1]).Unit * 1000
+                    end
+                elseif Method == "FindPartOnRay" or Method == "FindPartOnRayWithIgnoreList" then
+                    if Args[1] then
+                        local Origin = Args[1].Origin
+                        Args[1] = Ray.new(Origin, (TargetVector3 - Origin).Unit * 1000)
+                    end
+                end
+            end
+        end
+    end
+    return OldNamecall(Self, unpack(Args))
+end)
+
+-- ==============================================================================
+-- [UI CONTROLLER]
+-- ==============================================================================
+
+local MainTab = Window:CreateTab("Vector3 Control", 4483362458)
+
+local Toggle = MainTab:CreateToggle({
+   Name = "Lock Dada Vector 3D",
+   CurrentValue = false,
+   Flag = "VectorTorsoToggle",
+   Callback = function(Value)
+      SilentAimEnabled = Value
+      if Value then
+          Rayfield:Notify({
+             Title = "LOUIS HUB LOCKED",
+             Content = "Target dada dikunci di level koordinat engine!",
+             Duration = 3,
+             Image = 4483362458,
+          })
+      end
+   end,
+})
+
+Rayfield:Notify({
+   Title = "LouisHub Terbuka",
+   Content = "Script Vector 3D Dada aktif, Boss!",
+   Duration = 5,
+   Image = 4483362458,
+})
