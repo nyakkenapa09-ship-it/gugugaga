@@ -1,91 +1,328 @@
--- [[ MM2 SHERIFF SILENT AIM - LouisHub ULTIMATE FIX 2026 ]] --
+--[[
+═══════════════════════════════════════════════════════════
+    ROBLOX MM2 SILENT AIM - SHERIFF WEAPON
+    Version: 2.1 Complete
+    Environment: Lua Executor (Synapse X, Script-Ware, etc)
+    Game: Murder Mystery 2
+═══════════════════════════════════════════════════════════
+]]
 
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-local Window = Rayfield:CreateWindow({
-   Name = "LouisHub | MM2 Pure Core",
-   LoadingTitle = "Menginisialisasi LouisHub...",
-   LoadingSubtitle = "by @barzpuqi",
-   ConfigurationSaving = { Enabled = false },
-   Discord = { Enabled = false },
-   KeySystem = false
-})
-
--- Variables
+-- Services
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local SilentAimEnabled = false
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
--- Fungsi nyari target Murderer secara instan
-local function GetMurderer()
+-- ═══════════════════════════════════════════
+-- CONFIGURATION PANEL
+-- ═══════════════════════════════════════════
+
+local CONFIG = {
+    -- Core Settings
+    Enabled = true,
+    
+    -- Target Settings
+    FOVRadius = 200,              -- Pixel radius from mouse (0 = infinite range)
+    TargetPart = "Head",          -- "Head" or "HumanoidRootPart" or "Torso"
+    
+    -- Advanced Options
+    VisibleCheck = false,         -- Only shoot visible targets (through walls = false)
+    PredictMovement = true,       -- Lead moving targets
+    PredictionMultiplier = 0.15,  -- Bullet travel time compensation
+    
+    -- Visual Settings
+    ShowFOV = true,               -- Draw FOV circle
+    FOVColor = Color3.fromRGB(255, 255, 255),
+    FOVTransparency = 0.7,
+    
+    -- Keybinds
+    ToggleKey = Enum.KeyCode.T,   -- Press T to toggle on/off
+}
+
+-- ═══════════════════════════════════════════
+-- GLOBAL VARIABLES
+-- ═══════════════════════════════════════════
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local FOVCircle = nil
+
+-- ═══════════════════════════════════════════
+-- UTILITY FUNCTIONS
+-- ═══════════════════════════════════════════
+
+local function IsAlive(player)
+    if not player or not player.Character then return false end
+    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+local function GetTargetPart(character)
+    local part = character:FindFirstChild(CONFIG.TargetPart)
+    if part then return part end
+    
+    -- Fallback hierarchy
+    return character:FindFirstChild("Head") 
+        or character:FindFirstChild("HumanoidRootPart") 
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("UpperTorso")
+end
+
+local function IsVisible(origin, targetPart)
+    if not CONFIG.VisibleCheck then return true end
+    
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.IgnoreWater = true
+    
+    local direction = (targetPart.Position - origin)
+    local ray = Workspace:Raycast(origin, direction, rayParams)
+    
+    if ray then
+        return ray.Instance:IsDescendantOf(targetPart.Parent)
+    end
+    
+    return true
+end
+
+local function PredictPosition(targetPart)
+    if not CONFIG.PredictMovement then
+        return targetPart.Position
+    end
+    
+    -- Get target velocity
+    local velocity = targetPart.AssemblyVelocity or Vector3.new(0, 0, 0)
+    
+    -- Predict future position
+    local predictedPos = targetPart.Position + (velocity * CONFIG.PredictionMultiplier)
+    
+    return predictedPos
+end
+
+local function WorldToScreen(position)
+    local screenPos, onScreen = Camera:WorldToViewportPoint(position)
+    return Vector2.new(screenPos.X, screenPos.Y), onScreen
+end
+
+-- ═══════════════════════════════════════════
+-- TARGET ACQUISITION SYSTEM
+-- ═══════════════════════════════════════════
+
+local function GetBestTarget()
+    if not LocalPlayer.Character then return nil end
+    
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+    
+    local mousePos = UserInputService:GetMouseLocation()
+    
+    local closestTarget = nil
+    local closestDistance = math.huge
+    
+    -- Iterate through all players
     for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            if player.Character:FindFirstChild("Knife") or player.Backpack:FindFirstChild("Knife") then
-                return player.Character
+        -- Skip self
+        if player == LocalPlayer then continue end
+        
+        -- Check if alive
+        if not IsAlive(player) then continue end
+        
+        local character = player.Character
+        local targetPart = GetTargetPart(character)
+        
+        if targetPart then
+            -- FOV Check
+            if CONFIG.FOVRadius > 0 then
+                local screenPos, onScreen = WorldToScreen(targetPart.Position)
+                if not onScreen then continue end
+                
+                local screenDistance = (screenPos - mousePos).Magnitude
+                if screenDistance > CONFIG.FOVRadius then continue end
+            end
+            
+            -- Visibility Check
+            if not IsVisible(rootPart.Position, targetPart) then continue end
+            
+            -- Distance Comparison (world space)
+            local distance = (rootPart.Position - targetPart.Position).Magnitude
+            
+            if distance < closestDistance then
+                closestDistance = distance
+                closestTarget = targetPart
             end
         end
     end
-    return nil
+    
+    return closestTarget
 end
 
--- ==============================================================================
--- [ULTIMATE REMOTE INTERCEPTION - 100% WORK & NO LAG]
--- ==============================================================================
-local OldNamecall
-OldNamecall = hookmetamethod(game, "__namecall", function(Self, ...)
-    local Args = {...}
-    local Method = getnamecallmethod()
+-- ═══════════════════════════════════════════
+-- MOUSE HOOK SYSTEM
+-- ═══════════════════════════════════════════
+
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local args = {...}
+    local method = getnamecallmethod()
     
-    -- Memotong jalur data saat game mengirimkan trigger tembakan ke server
-    if SilentAimEnabled and Method == "FireServer" then
-        -- Deteksi nama RemoteEvent peluru MM2 (biasanya "ShootGun" atau lewat tool gun)
-        if Self.Name == "ShootGun" or Self.Parent == LocalPlayer.Character:FindFirstChild("Gun") then
-            local Murderer = GetMurderer()
-            if Murderer then
-                -- Target dada murni (Vector3)
-                local Chest = Murderer:FindFirstChild("UpperTorso") or Murderer:FindFirstChild("Torso") or Murderer:FindFirstChild("HumanoidRootPart")
-                if Chest then
-                    -- Cari di mana argumen posisi Vector3 berada, lalu timpa dengan posisi dada Murderer
-                    for i, arg in pairs(Args) do
-                        if typeof(arg) == "Vector3" then
-                            Args[i] = Chest.Position -- Paksa koordinat 3D murni ke dada target!
-                            break
-                        end
-                    end
+    -- Hook Mouse.Hit and Mouse.Target
+    if CONFIG.Enabled and method == "FireServer" then
+        local target = GetBestTarget()
+        
+        if target then
+            local predictedPos = PredictPosition(target)
+            
+            -- Modify the hit position in the arguments
+            for i, arg in pairs(args) do
+                if typeof(arg) == "CFrame" then
+                    args[i] = CFrame.new(predictedPos)
+                elseif typeof(arg) == "Vector3" then
+                    args[i] = predictedPos
                 end
             end
         end
     end
     
-    return OldNamecall(Self, unpack(Args))
+    return oldNamecall(self, unpack(args))
 end)
 
--- ==============================================================================
--- [UI CONTROLLER]
--- ==============================================================================
+-- Alternative Mouse.Hit hook
+local oldIndex
+oldIndex = hookmetamethod(game, "__index", function(self, key)
+    if CONFIG.Enabled and self == LocalPlayer:GetMouse() then
+        if key == "Hit" then
+            local target = GetBestTarget()
+            
+            if target then
+                local predictedPos = PredictPosition(target)
+                return CFrame.new(predictedPos)
+            end
+        elseif key == "Target" then
+            local target = GetBestTarget()
+            if target then
+                return target
+            end
+        end
+    end
+    
+    return oldIndex(self, key)
+end)
 
-local MainTab = Window:CreateTab("Main Features", 4483362458)
+-- ═══════════════════════════════════════════
+-- FOV CIRCLE VISUAL
+-- ═══════════════════════════════════════════
 
-local Toggle = MainTab:CreateToggle({
-   Name = "Silent Aim (Lock Dada)",
-   CurrentValue = false,
-   Flag = "LouisTorsoToggle",
-   Callback = function(Value)
-      SilentAimEnabled = Value
-      if Value then
-          Rayfield:Notify({
-             Title = "LOUIS HUB",
-             Content = "Sistem Remote Active! Tembakan auto-lock dada, Boss!",
-             Duration = 3,
-             Image = 4483362458,
-          })
-      end
-   end,
-})
+local function CreateFOVCircle()
+    if CONFIG.ShowFOV then
+        FOVCircle = Drawing.new("Circle")
+        FOVCircle.Thickness = 2
+        FOVCircle.NumSides = 64
+        FOVCircle.Radius = CONFIG.FOVRadius
+        FOVCircle.Filled = false
+        FOVCircle.Color = CONFIG.FOVColor
+        FOVCircle.Transparency = CONFIG.FOVTransparency
+        FOVCircle.Visible = true
+        FOVCircle.ZIndex = 999
+    end
+end
 
-Rayfield:Notify({
-   Title = "LouisHub Ready",
-   Content = "Script 100% Work Sukses Dimuat!",
-   Duration = 5,
-   Image = 4483362458,
-})
+local function UpdateFOVCircle()
+    if FOVCircle then
+        local mousePos = UserInputService:GetMouseLocation()
+        FOVCircle.Position = Vector2.new(mousePos.X, mousePos.Y)
+        FOVCircle.Radius = CONFIG.FOVRadius
+        FOVCircle.Visible = CONFIG.ShowFOV and CONFIG.Enabled
+    end
+end
+
+-- ═══════════════════════════════════════════
+-- GUI NOTIFICATION SYSTEM
+-- ═══════════════════════════════════════════
+
+local function Notify(message, duration)
+    duration = duration or 3
+    
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Silent Aim",
+        Text = message,
+        Duration = duration,
+        Icon = "rbxassetid://2541869220"
+    })
+end
+
+-- ═══════════════════════════════════════════
+-- INPUT HANDLING
+-- ═══════════════════════════════════════════
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    -- Toggle Silent Aim
+    if input.KeyCode == CONFIG.ToggleKey then
+        CONFIG.Enabled = not CONFIG.Enabled
+        
+        local status = CONFIG.Enabled and "ENABLED" or "DISABLED"
+        Notify("Silent Aim " .. status, 2)
+        
+        print("[Silent Aim] " .. status)
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- RENDER LOOP
+-- ═══════════════════════════════════════════
+
+RunService.RenderStepped:Connect(function()
+    UpdateFOVCircle()
+end)
+
+-- ═══════════════════════════════════════════
+-- INITIALIZATION
+-- ═══════════════════════════════════════════
+
+local function Initialize()
+    -- Create FOV Circle
+    CreateFOVCircle()
+    
+    -- Initial notification
+    Notify("Silent Aim Loaded\nPress " .. CONFIG.ToggleKey.Name .. " to toggle", 5)
+    
+    -- Console output
+    print("═══════════════════════════════════════════")
+    print("  MM2 SILENT AIM - INITIALIZED")
+    print("═══════════════════════════════════════════")
+    print("Status: ENABLED")
+    print("FOV Radius: " .. CONFIG.FOVRadius .. "px")
+    print("Target Part: " .. CONFIG.TargetPart)
+    print("Prediction: " .. tostring(CONFIG.PredictMovement))
+    print("Toggle Key: " .. CONFIG.ToggleKey.Name)
+    print("═══════════════════════════════════════════")
+end
+
+-- Run initialization
+Initialize()
+
+--[[
+═══════════════════════════════════════════════════════════
+    CONTROLS:
+    - Press T to toggle Silent Aim ON/OFF
+    - FOV circle follows your mouse
+    - Automatically targets closest player in FOV when shooting
+    
+    CONFIGURATION:
+    - Edit CONFIG table at top of script
+    - Adjust FOVRadius for tighter/wider aim assist
+    - Change TargetPart for headshots or body shots
+    - Enable PredictMovement for moving targets
+    
+    FEATURES:
+    ✓ Auto-aim to closest target
+    ✓ FOV-based targeting
+    ✓ Movement prediction
+    ✓ Visibility check (optional)
+    ✓ Visual FOV circle
+    ✓ Toggle on/off
+    
+═══════════════════════════════════════════════════════════
+]]
