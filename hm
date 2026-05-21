@@ -1,15 +1,39 @@
--- ToBlUt GpT V1 - MM2 Silent Aim Sheriff 2026 Bypass
--- Target: Dada Murderer (UpperTorso / HumanoidRootPart)
+-- [[ ToBlUt GpT V1 - MM2 Silent Aim Setup with Rayfield UI ]] --
 
+-- Load Rayfield UI Library
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- Membuat Window Utama
+local Window = Rayfield:CreateWindow({
+   Name = "ToBlUt GpT V1 - Murder Mystery 2",
+   LoadingTitle = "Loading Sheriff Suite...",
+   LoadingSubtitle = "by barzpuqi",
+   ConfigurationSaving = {
+      Enabled = false,
+      FolderName = nil,
+      FileName = "ToBlUtMM2"
+   },
+   Discord = {
+      Enabled = false,
+      Invite = "",
+      RememberJoins = false
+   },
+   KeySystem = false
+})
+
+-- Tambah Tab Utama
+local CombatTab = Window:CreateTab("Combat", 4483362458) -- Icon ID
+
+-- State Global untuk Fitur
+_G.SilentAimEnabled = false
+
+-- Fungsi Melacak Murderer
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-local Teams = game:GetService("Teams") -- Atau melacak tools jika MM2 tidak pakai Teams formal
 
--- Fungsi mencari player yang jadi Murderer (memegang Knife)
 local function getMurderer()
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
-            -- Cek apakah karakter memegang Knife di backpack atau di karakter
             if player.Character:FindFirstChild("Knife") or (player:FindFirstChild("Backpack") and player.Backpack:FindFirstChild("Knife")) then
                 return player
             end
@@ -18,7 +42,7 @@ local function getMurderer()
     return nil
 end
 
--- Hooking Index / Namecall untuk manipulasi arah tembakan (Silent Aim)
+-- Hooking Metatable (Hanya berjalan jika _G.SilentAimEnabled = true)
 local gmt = getrawmetatable(game)
 local oldNamecall = gmt.__namecall
 setreadonly(gmt, false)
@@ -27,18 +51,11 @@ gmt.__namecall = newcclosure(function(self, ...)
     local args = {...}
     local method = getnamecallmethod()
     
-    -- Mengintercept RemoteEvent tembakan milik Sheriff
-    -- Catatan: Nama remote bisa berubah, sesuaikan dengan struktur game MM2 terbaru
-    if method == "FireServer" and tostring(self) == "ShootGun" or tostring(self) == "UseGun" then
+    if _G.SilentAimEnabled and method == "FireServer" and (tostring(self) == "ShootGun" or tostring(self) == "UseGun") then
         local targetMurderer = getMurderer()
-        
         if targetMurderer and targetMurderer.Character then
-            -- Mengunci target pada bagian Dada (UpperTorso untuk R15, Torso untuk R6)
             local targetPart = targetMurderer.Character:FindFirstChild("UpperTorso") or targetMurderer.Character:FindFirstChild("HumanoidRootPart")
-            
             if targetPart then
-                -- Mengubah argumen posisi tembakan menuju koordinat dada Murderer
-                -- Biasanya argumen pertama atau kedua adalah Vector3 posisi target
                 for i, arg in ipairs(args) do
                     if typeof(arg) == "Vector3" then
                         args[i] = targetPart.Position
@@ -53,3 +70,36 @@ gmt.__namecall = newcclosure(function(self, ...)
 end)
 
 setreadonly(gmt, true)
+
+-- Membuat Toggle di UI Rayfield
+CombatTab:CreateToggle({
+   Name = "Silent Aim (Target: Murderer Dada)",
+   CurrentValue = false,
+   Flag = "SilentAimToggle",
+   Callback = function(Value)
+      _G.SilentAimEnabled = Value
+      if Value then
+          Rayfield:Notify({
+             Title = "Silent Aim",
+             Content = "Status: AKTIF! Selamat berburu Murderer.",
+             Duration = 3,
+             Image = 4483362458,
+          })
+      else
+          Rayfield:Notify({
+             Title = "Silent Aim",
+             Content = "Status: NONAKTIF!",
+             Duration = 3,
+             Image = 4483362458,
+          })
+      end
+   end,
+})
+
+-- Notifikasi sukses load UI
+Rayfield:Notify({
+   Title = "Sistem Siap!",
+   Content = "ToBlUt GpT V1 UI Berhasil Dimuat.",
+   Duration = 5,
+   Image = 4483362458,
+})
